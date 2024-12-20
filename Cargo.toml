@@ -1,0 +1,10 @@
+[package]
+name = "arena"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.94"
+bevy = { version = "0.14.2", default-features = false }
+clap = { version = "4.5.23", features = ["derive"] }
+wasmer = "4.4.0"
