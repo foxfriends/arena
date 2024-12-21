@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use clap::Parser;
+use std::collections::HashMap;
 use std::path::PathBuf;
-use wasmer::{imports, Imports, Instance, Module, Store};
+use wasmer::{imports, Imports, Instance, Module, Store, Value};
 
 #[derive(clap::ValueEnum, Clone)]
 enum Game {
@@ -19,20 +20,27 @@ trait Arena: Plugin {
     fn imports(&self) -> Imports {
         imports! {}
     }
+
+    fn register_bot(app: &mut App, bot: Bot);
 }
 
 struct Digger;
 
-impl Arena for Digger {}
+impl Arena for Digger {
+    fn register_bot(_app: &mut App, _bot: Bot) {}
+}
 
 impl Plugin for Digger {
-    fn build(&self, app: &mut App) {}
+    fn build(&self, _app: &mut App) {}
 }
 
 struct Bot {
     name: String,
     instance: Instance,
 }
+
+#[derive(Resource)]
+struct Actions(HashMap<String, String>);
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -57,18 +65,31 @@ fn main() -> anyhow::Result<()> {
         bots.push(Bot {
             name: file.file_name().to_string_lossy().into_owned(),
             instance,
-        })
+        });
     }
 
     let mut app = App::new();
     app.add_plugins(arena);
 
+    for bot in &mut bots {
+        let init = bot.instance.exports.get_function("init")?;
+        init.call(&mut store, &[])?;
+    }
+
     loop {
-        for bot in &bots {
-            let bot_main = bot.instance.exports.get_function("main")?;
-            let result = bot_main.call(&mut store, &[])?;
-            println!("{:?}", result);
+        let mut actions = HashMap::new();
+        for bot in &mut bots {
+            let step = bot.instance.exports.get_function("step")?;
+            let result = step.call(&mut store, &[])?;
+            let offset = result[0].unwrap_i64() as u64;
+            let length = result[1].unwrap_i64() as usize;
+
+            let arena_memory = bot.instance.exports.get_memory("arena")?;
+            let view = arena_memory.view(&store);
+            let mut buffer = vec![0; length as usize];
+            view.read(offset, &mut buffer)?;
+            actions.insert(bot.name.clone(), String::from_utf8(buffer)?);
         }
-        app.update();
+        app.insert_resource(Actions(actions)).update();
     }
 }
